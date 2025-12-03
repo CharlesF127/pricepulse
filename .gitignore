@@ -1,0 +1,54 @@
+# ===========================================
+# Global ignores
+# ===========================================
+
+# Logs
+logs
+*.log
+npm-debug.log*
+yarn-debug.log*
+yarn-error.log*
+pnpm-debug.log*
+lerna-debug.log*
+
+# System
+.DS_Store
+
+# IDEs
+.vscode/*
+!.vscode/extensions.json
+.idea
+*.suo
+*.ntvs*
+*.njsproj
+*.sln
+*.sw?
+
+# ===========================================
+# Frontend (Vite React)
+# ===========================================
+
+frontend/node_modules
+frontend/dist
+
+# Frontend environment variables
+frontend/.env
+frontend/.env.production
+
+# ===========================================
+# Backend (Node/Express)
+# ===========================================
+
+backend/node_modules
+
+# Backend environment variables
+backend/.env
+
+# ===========================================
+# Root-level build artifacts (just in case)
+# ===========================================
+
+node_modules
+dist
+dist-ssr
+*.local

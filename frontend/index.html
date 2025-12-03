@@ -1,0 +1,105 @@
+<!doctype html>
+<html lang="en" class="light">
+  <head>
+    <meta charset="UTF-8" />
+
+    <!-- Favicon -->
+    <link rel="icon" href="/favicon.ico" sizes="any" />
+    <link rel="icon" type="image/svg+xml" href="/favicon.svg" />
+    <link rel="icon" type="image/png" href="/favicon-32x32.png" sizes="32x32" />
+
+
+    <!-- Viewport -->
+    <meta name="viewport" content="width=device-width, initial-scale=1" />
+
+    <!-- Title -->
+    <title>PricePulse - Competitor Price Monitoring</title>
+
+    <!-- SEO -->
+    <meta
+      name="description"
+      content="Monitor competitor prices in real-time with PricePulse. Track competitor products, get alerts on price changes, and stay ahead in your market."
+    />
+    <meta name="author" content="PricePulse Team" />
+
+    <!-- Open Graph -->
+    <meta property="og:title" content="PricePulse - Competitor Price Monitoring" />
+    <meta
+      property="og:description"
+      content="Monitor competitor prices in real-time with PricePulse."
+    />
+    <meta property="og:type" content="website" />
+    <meta property="og:url" content="https://pricepulse.app/" />
+    <meta property="og:image" content="/og-image.png" />
+
+    <!-- Twitter -->
+    <meta name="twitter:card" content="summary_large_image" />
+    <meta name="twitter:site" content="@pricepulse" />
+    <meta name="twitter:title" content="PricePulse - Competitor Price Monitoring" />
+    <meta
+      name="twitter:description"
+      content="Monitor competitor prices in real-time with PricePulse."
+    />
+    <meta name="twitter:image" content="/og-image.png" />
+
+    <!-- PWA / Theme -->
+    <meta name="theme-color" content="#4f46e5" />
+    <link rel="manifest" href="/manifest.json" />
+
+    <!-- Apple Mobile Web App -->
+    <meta name="apple-mobile-web-app-capable" content="yes" />
+    <meta name="apple-mobile-web-app-status-bar-style" content="black-translucent" />
+    <meta name="apple-mobile-web-app-title" content="PricePulse" />
+    <link rel="apple-touch-icon" href="/icons/icon-192x192.png" />
+
+    <!-- Dark mode styles (ONLY when html has class="dark") -->
+    <style>
+      html.dark body {
+        background-color: #020617; /* very dark slate */
+        color: #f9fafb; /* near white text */
+      }
+
+      html.dark input,
+      html.dark textarea,
+      html.dark select {
+        color: #ffffff; /* ✅ text while typing is white */
+        background-color: #020617;
+        border-color: #1f2937;
+        caret-color: #ffffff;
+      }
+
+      html.dark input::placeholder,
+      html.dark textarea::placeholder {
+        color: #9ca3af;
+      }
+    </style>
+
+    <!-- JSON-LD Structured Data -->
+    <script type="application/ld+json">
+      {
+        "@context": "https://schema.org",
+        "@type": "SoftwareApplication",
+        "name": "PricePulse",
+        "applicationCategory": "BusinessApplication",
+        "operatingSystem": "Web",
+        "description": "Monitor competitor prices in real-time, track products, and get alerts when prices change.",
+        "url": "https://pricepulse.app/",
+        "image": "https://pricepulse.app/og-image.png",
+        "creator": {
+          "@type": "Organization",
+          "name": "PricePulse"
+        },
+        "offers": {
+          "@type": "Offer",
+          "price": "0",
+          "priceCurrency": "USD"
+        }
+      }
+    </script>
+  </head>
+
+  <body>
+    <div id="root"></div>
+    <script type="module" src="/src/main.tsx"></script>
+  </body>
+</html>
