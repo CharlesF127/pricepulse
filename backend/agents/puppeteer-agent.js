@@ -11,6 +11,14 @@ require("dotenv").config();
 
 puppeteer.use(StealthPlugin());
 
+/**
+ * ✅ REQUIRED FOR RENDER
+ * Chrome must be installed manually & path injected via env var
+ */
+const EXECUTABLE_PATH = process.env.PUPPETEER_EXECUTABLE_PATH;
+
+console.log("🚀 Puppeteer using executable:", EXECUTABLE_PATH);
+
 // Delay helper
 const delay = (ms) => new Promise((res) => setTimeout(res, ms));
 
@@ -66,6 +74,13 @@ async function scrapeGoat({ url, size, retries = 3 }) {
     try {
       browser = await puppeteer.launch({
         headless: "new",
+
+        /**
+         * ✅ FIX FOR RENDER
+         * Puppeteer must use the installed Chrome from env variable
+         */
+        executablePath: EXECUTABLE_PATH,
+
         args: [
           "--no-sandbox",
           "--disable-setuid-sandbox",
@@ -81,27 +96,22 @@ async function scrapeGoat({ url, size, retries = 3 }) {
       await page.setUserAgent(new UserAgent().toString());
       await page.setExtraHTTPHeaders({ "Accept-Language": "en-US,en;q=0.9" });
 
-      // GOAT sometimes redirects; enable failure handling
       await page.setDefaultNavigationTimeout(90000);
 
       console.log("▶️ Navigating to page...");
       await page.goto(url, { waitUntil: "domcontentloaded" });
 
-      // Additional wait to let dynamic GOAT UI load
       await delay(4000);
 
-      // Primary selector
       try {
         console.log(`⏳ Waiting for main container: ${goatSelectors.buyBarContainer}`);
         await page.waitForSelector(goatSelectors.buyBarContainer, {
           timeout: 45000,
         });
-      } catch (err) {
-        console.warn("⚠️ GOAT UI did not load the buy bar. Retrying...");
+      } catch {
         throw new Error("GOAT buy bar not found");
       }
 
-      // Extract all available size/price pairs
       const availablePricesRaw = await page.evaluate(() => {
         const nodes = document.querySelectorAll('[data-qa^="buy_bar_price_size_"]');
         return Array.from(nodes).map((el) => {
@@ -116,16 +126,12 @@ async function scrapeGoat({ url, size, retries = 3 }) {
 
       console.log("🧪 Available Prices:", availablePricesRaw);
 
-      // Ensure the size exists
       const target = availablePricesRaw.find((p) => p.size === size);
       if (!target) {
-        console.log(`❌ Size ${size} not found. Retrying...`);
-
         if (attempt < retries) {
           await delay(5000);
           continue;
         }
-
         return buildResult({
           success: false,
           error: `Size ${size} not found on GOAT.`,
@@ -133,11 +139,9 @@ async function scrapeGoat({ url, size, retries = 3 }) {
         });
       }
 
-      // Use selectors
       const priceSelector = goatSelectors.priceForSize(size);
       const sizeSelector = goatSelectors.sizeForSize(size);
 
-      console.log("⏳ Waiting for price element:", priceSelector);
       await page.waitForSelector(priceSelector, { visible: true, timeout: 30000 });
 
       const extracted = await page.evaluate(
@@ -162,15 +166,10 @@ async function scrapeGoat({ url, size, retries = 3 }) {
       const numericPrice = extractNumericPrice(extracted.priceText);
 
       if (!numericPrice) {
-        console.log(
-          `❌ Could not extract numeric price from "${extracted.priceText}". Retrying...`
-        );
-
         if (attempt < retries) {
           await delay(5000);
           continue;
         }
-
         return buildResult({
           success: false,
           error: `Failed to extract price for size ${size}.`,
@@ -194,13 +193,10 @@ async function scrapeGoat({ url, size, retries = 3 }) {
       console.error(`🚫 Scrape error attempt ${attempt}:`, err.message);
 
       if (browser) {
-        try {
-          await browser.close();
-        } catch {}
+        try { await browser.close(); } catch {}
       }
 
       if (attempt < retries) {
-        console.log("🔁 Retrying in 6 seconds...");
         await delay(6000);
       } else {
         return buildResult({
