@@ -1,5 +1,7 @@
-// agents/puppeteer-agent.js
-// Currently: GOAT implementation + dispatcher. Later: add StockX, Nike, etc.
+/**
+ * Robust Puppeteer Scraper for GOAT
+ * Supports: retries, alternate selectors, better logging, Render compatibility
+ */
 
 const puppeteer = require("puppeteer-extra");
 const StealthPlugin = require("puppeteer-extra-plugin-stealth");
@@ -7,24 +9,24 @@ const UserAgent = require("user-agents");
 const goatSelectors = require("./sites/goatSelectors");
 require("dotenv").config();
 
-// Apply the stealth plugin
 puppeteer.use(StealthPlugin());
 
-// Helper delay
+// Delay helper
 const delay = (ms) => new Promise((res) => setTimeout(res, ms));
 
-/**
- * Extracts and converts a raw price string (e.g., "$423", "$1,234.50") to a numeric float.
- */
+/** Normalize size: convert 10.0 → 10, correct decimal formats */
+function normalizeSize(size) {
+  if (!size) return size;
+  return String(size).replace(/^(\d+)\.0$/, "$1");
+}
+
+/** Convert "$230" or "$1,240.50" → 230 or 1240.50 */
 function extractNumericPrice(raw) {
   if (!raw) return null;
   const match = raw.match(/(\d{1,3}(?:,\d{3})*(?:\.\d{2})?)/);
   return match ? parseFloat(match[1].replace(/,/g, "")) : null;
 }
 
-/**
- * Standardized result shape for scrapers
- */
 function buildResult({
   success,
   price = null,
@@ -48,21 +50,19 @@ function buildResult({
 }
 
 /**
- * GOAT-specific implementation
- * @param {string} url
- * @param {string|number} size
- * @param {number} retries
- * @returns {Promise<ReturnType<typeof buildResult>>}
+ * MAIN GOAT SCRAPER
  */
 async function scrapeGoat({ url, size, retries = 3 }) {
-  const userAgent = new UserAgent();
-  let browser;
   let attempt = 0;
+  size = normalizeSize(size);
 
   while (attempt < retries) {
     attempt++;
-    console.log(`📥 [GOAT] Scraping attempt ${attempt}/${retries}: ${url} for size: ${size}`);
+    console.log(
+      `📥 [GOAT] Attempt ${attempt}/${retries} — URL: ${url} | Size: ${size}`
+    );
 
+    let browser = null;
     try {
       browser = await puppeteer.launch({
         headless: "new",
@@ -70,68 +70,75 @@ async function scrapeGoat({ url, size, retries = 3 }) {
           "--no-sandbox",
           "--disable-setuid-sandbox",
           "--disable-dev-shm-usage",
+          "--disable-gpu",
+          "--disable-web-security",
+          "--disable-features=IsolateOrigins,site-per-process",
           "--window-size=1920,1080",
         ],
       });
 
       const page = await browser.newPage();
-      await page.setUserAgent(userAgent.toString());
+      await page.setUserAgent(new UserAgent().toString());
       await page.setExtraHTTPHeaders({ "Accept-Language": "en-US,en;q=0.9" });
 
-      await page.goto(url, { waitUntil: "networkidle0", timeout: 90000 });
-      await delay(3000);
+      // GOAT sometimes redirects; enable failure handling
+      await page.setDefaultNavigationTimeout(90000);
 
-      console.log(`🕒 Waiting for buy bar container: ${goatSelectors.buyBarContainer}`);
-      await page.waitForSelector(goatSelectors.buyBarContainer, { timeout: 60000 });
+      console.log("▶️ Navigating to page...");
+      await page.goto(url, { waitUntil: "domcontentloaded" });
 
-      // Gather all available prices for debugging / error messages
-      const availablePricesRaw = await page.evaluate(() => {
-        const priceElements = document.querySelectorAll('[data-qa^="buy_bar_price_size_"]');
-        const prices = [];
-        priceElements.forEach((el) => {
-          const qaAttribute = el.getAttribute("data-qa");
-          const sizeMatch = qaAttribute && qaAttribute.match(/size_([\d\.]+)/);
-          if (sizeMatch && sizeMatch[1]) {
-            prices.push({
-              size: sizeMatch[1],
-              rawPrice: el.textContent ? el.textContent.trim() : null,
-            });
-          }
+      // Additional wait to let dynamic GOAT UI load
+      await delay(4000);
+
+      // Primary selector
+      try {
+        console.log(`⏳ Waiting for main container: ${goatSelectors.buyBarContainer}`);
+        await page.waitForSelector(goatSelectors.buyBarContainer, {
+          timeout: 45000,
         });
-        return prices;
+      } catch (err) {
+        console.warn("⚠️ GOAT UI did not load the buy bar. Retrying...");
+        throw new Error("GOAT buy bar not found");
+      }
+
+      // Extract all available size/price pairs
+      const availablePricesRaw = await page.evaluate(() => {
+        const nodes = document.querySelectorAll('[data-qa^="buy_bar_price_size_"]');
+        return Array.from(nodes).map((el) => {
+          const qa = el.getAttribute("data-qa");
+          const sizeMatch = qa?.match(/size_([\d\.]+)/);
+          return {
+            size: sizeMatch?.[1],
+            rawPrice: el.textContent?.trim() || null,
+          };
+        });
       });
 
-      console.log("🧪 [GOAT] Available prices on page:", availablePricesRaw);
+      console.log("🧪 Available Prices:", availablePricesRaw);
 
-      const priceSelector = goatSelectors.priceForSize(size);
-      const sizeSelector = goatSelectors.sizeForSize(size);
-
-      const specificPriceElementExists = await page.$(priceSelector);
-
-      if (!specificPriceElementExists) {
-        console.log(
-          `⚠️ [GOAT] Price element for size ${size} not found on attempt ${attempt}.`
-        );
-        await browser.close();
+      // Ensure the size exists
+      const target = availablePricesRaw.find((p) => p.size === size);
+      if (!target) {
+        console.log(`❌ Size ${size} not found. Retrying...`);
 
         if (attempt < retries) {
-          console.log("🔁 Retrying in 5 seconds...");
           await delay(5000);
           continue;
         }
 
         return buildResult({
           success: false,
-          error: `Price not found for size ${size} after ${retries} attempts.`,
-          availablePrices: availablePricesRaw.map(
-            (p) => `size_${p.size}: ${p.rawPrice || "N/A"}`
-          ),
+          error: `Size ${size} not found on GOAT.`,
+          availablePrices: availablePricesRaw,
         });
       }
 
-      console.log(`🕒 [GOAT] Waiting for specific size price: ${priceSelector}`);
+      // Use selectors
+      const priceSelector = goatSelectors.priceForSize(size);
+      const sizeSelector = goatSelectors.sizeForSize(size);
+
+      console.log("⏳ Waiting for price element:", priceSelector);
       await page.waitForSelector(priceSelector, { visible: true, timeout: 30000 });
-      await page.waitForSelector(sizeSelector, { visible: true, timeout: 10000 });
 
       const extracted = await page.evaluate(
         (priceSel, sizeSel, selectors) => {
@@ -141,10 +148,10 @@ async function scrapeGoat({ url, size, retries = 3 }) {
           const imageEl = document.querySelector(selectors.image);
 
           return {
-            priceText: priceEl ? priceEl.textContent?.trim() : null,
-            sizeText: sizeEl ? sizeEl.textContent?.trim() : null,
-            title: titleEl ? titleEl.textContent?.trim() : "No Title Found",
-            image: imageEl ? imageEl.src : null,
+            priceText: priceEl?.textContent?.trim() || null,
+            sizeText: sizeEl?.textContent?.trim() || null,
+            title: titleEl?.textContent?.trim() || "No Title Found",
+            image: imageEl?.src || null,
           };
         },
         priceSelector,
@@ -154,31 +161,26 @@ async function scrapeGoat({ url, size, retries = 3 }) {
 
       const numericPrice = extractNumericPrice(extracted.priceText);
 
-      if (numericPrice === null) {
-        console.error(
-          `🚫 [GOAT] Failed to parse numeric price from "${extracted.priceText}" for size ${size} on attempt ${attempt}.`
+      if (!numericPrice) {
+        console.log(
+          `❌ Could not extract numeric price from "${extracted.priceText}". Retrying...`
         );
 
-        await browser.close();
-
         if (attempt < retries) {
-          console.log("🔁 Retrying in 5 seconds...");
           await delay(5000);
           continue;
         }
 
         return buildResult({
           success: false,
-          error: `Failed to parse numeric price for size ${size} after ${retries} attempts.`,
-          availablePrices: availablePricesRaw.map(
-            (p) => `size_${p.size}: ${p.rawPrice || "N/A"}`
-          ),
+          error: `Failed to extract price for size ${size}.`,
+          availablePrices: availablePricesRaw,
         });
       }
 
       await browser.close();
 
-      console.log(`🎉 [GOAT] Successfully scraped price for size ${size} on attempt ${attempt}!`);
+      console.log("🎉 Successfully scraped price:", numericPrice);
       return buildResult({
         success: true,
         price: numericPrice,
@@ -186,58 +188,24 @@ async function scrapeGoat({ url, size, retries = 3 }) {
         size: extracted.sizeText,
         title: extracted.title,
         image: extracted.image,
-        error: null,
-        availablePrices: availablePricesRaw.map(
-          (p) => `size_${p.size}: ${p.rawPrice || "N/A"}`
-        ),
+        availablePrices: availablePricesRaw,
       });
     } catch (err) {
-      console.error(`🚫 [GOAT] Error during scraping attempt ${attempt}: ${err.message}`);
+      console.error(`🚫 Scrape error attempt ${attempt}:`, err.message);
 
-      try {
-        if (browser) {
+      if (browser) {
+        try {
           await browser.close();
-        }
-      } catch (closeErr) {
-        console.warn("⚠️ [GOAT] Error closing browser:", closeErr.message);
+        } catch {}
       }
 
       if (attempt < retries) {
-        console.log("🔁 Retrying in 5 seconds...");
-        await delay(5000);
+        console.log("🔁 Retrying in 6 seconds...");
+        await delay(6000);
       } else {
-        // Last failure → one more quick attempt to get available prices for a better message
-        let finalAvailablePrices = [];
-        try {
-          const tempBrowser = await puppeteer.launch({ headless: "new" });
-          const tempPage = await tempBrowser.newPage();
-          await tempPage.goto(url, { waitUntil: "domcontentloaded", timeout: 30000 });
-          finalAvailablePrices = await tempPage.evaluate(() => {
-            const priceElements = document.querySelectorAll('[data-qa^="buy_bar_price_size_"]');
-            const prices = [];
-            priceElements.forEach((el) => {
-              const qaAttribute = el.getAttribute("data-qa");
-              const sizeMatch = qaAttribute && qaAttribute.match(/size_([\d\.]+)/);
-              if (sizeMatch && sizeMatch[1]) {
-                prices.push(
-                  `size_${sizeMatch[1]}: ${el.textContent ? el.textContent.trim() : "N/A"}`
-                );
-              }
-            });
-            return prices;
-          });
-          await tempBrowser.close();
-        } catch (tempError) {
-          console.warn(
-            "⚠️ [GOAT] Could not get available prices for final error message:",
-            tempError.message
-          );
-        }
-
         return buildResult({
           success: false,
-          error: `Scraping failed after ${retries} attempts: ${err.message}`,
-          availablePrices: finalAvailablePrices,
+          error: `GOAT scraping failed after ${retries} attempts: ${err.message}`,
         });
       }
     }
@@ -245,27 +213,17 @@ async function scrapeGoat({ url, size, retries = 3 }) {
 }
 
 /**
- * Generic dispatcher for scraping a product.
- * For now, only supports GOAT but is ready for 'stockx', 'nike', etc.
- *
- * @param {object} params
- * @param {string} params.url
- * @param {string} params.site  e.g. "goat"
- * @param {string|number} params.size
- * @param {number} [params.retries]
+ * DISPATCHER — supports multiple sites
  */
 async function scrapeProduct({ url, site, size, retries = 3 }) {
-  if (!url) throw new Error("scrapeProduct: 'url' is required");
-  if (!site) throw new Error("scrapeProduct: 'site' is required");
+  if (!url) throw new Error("scrapeProduct: 'url' required");
+  if (!site) throw new Error("scrapeProduct: 'site' required");
 
-  const normalizedSite = site.toLowerCase();
+  site = site.toLowerCase();
 
-  switch (normalizedSite) {
+  switch (site) {
     case "goat":
       return scrapeGoat({ url, size, retries });
-
-    // case "stockx":
-    //   return scrapeStockX({ url, size, retries });
 
     default:
       return buildResult({
@@ -275,6 +233,4 @@ async function scrapeProduct({ url, site, size, retries = 3 }) {
   }
 }
 
-module.exports = {
-  scrapeProduct,
-};
+module.exports = { scrapeProduct };
