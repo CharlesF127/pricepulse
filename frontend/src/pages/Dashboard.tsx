@@ -1,236 +1,315 @@
-/**
- * Robust Puppeteer Scraper for GOAT
- * Supports: retries, alternate selectors, better logging, Render compatibility
- */
+import React, { useEffect, useState } from "react";
+import { useNavigate } from "react-router-dom";
+import Navbar from "@/components/Navbar";
+import DashboardSummary from "@/components/DashboardSummary";
+import ProductsTable from "@/components/ProductsTable";
+import AddProductForm from "@/components/AddProductForm";
+import { Tabs, TabsContent, TabsList, TabsTrigger } from "@/components/ui/tabs";
+import { Toaster, toast } from "@/components/ui/sonner";
+import { useQuery, useQueryClient } from "@tanstack/react-query";
+import Chart24Hour from "@/components/Chart24Hour";
+import Chart7Day from "@/components/Chart7Day";
+import Chart30Day from "@/components/Chart30Day";
+import io from "socket.io-client";
+import { API_BASE } from "@/config"; // 👈 ADD THIS
 
-const puppeteer = require("puppeteer-extra");
-const StealthPlugin = require("puppeteer-extra-plugin-stealth");
-const UserAgent = require("user-agents");
-const goatSelectors = require("./sites/goatSelectors");
-require("dotenv").config();
+export type Product = {
+  _id: string;
+  productName: string;
+  url: string;
+  history: {
+    price: number;
+    timestamp: string;
+  }[];
+};
 
-puppeteer.use(StealthPlugin());
+const Dashboard = () => {
+  const navigate = useNavigate();
+  const userId = localStorage.getItem("userId");
+  const token = localStorage.getItem("token");
+  const queryClient = useQueryClient();
 
-// Delay helper
-const delay = (ms) => new Promise((res) => setTimeout(res, ms));
+  const [selectedProduct, setSelectedProduct] = useState<Product | null>(null);
+  const [timeframe, setTimeframe] = useState<"24h" | "7d" | "30d">("7d");
 
-/** Normalize size: convert 10.0 → 10, correct decimal formats */
-function normalizeSize(size) {
-  if (!size) return size;
-  return String(size).replace(/^(\d+)\.0$/, "$1");
-}
+  // 🔴 NEW: notification badge count
+  const [notificationCount, setNotificationCount] = useState(0);
 
-/** Convert "$230" or "$1,240.50" → 230 or 1240.50 */
-function extractNumericPrice(raw) {
-  if (!raw) return null;
-  const match = raw.match(/(\d{1,3}(?:,\d{3})*(?:\.\d{2})?)/);
-  return match ? parseFloat(match[1].replace(/,/g, "")) : null;
-}
+  useEffect(() => {
+    if (!token || !userId) {
+      navigate("/");
+    }
+  }, [token, userId, navigate]);
 
-function buildResult({
-  success,
-  price = null,
-  rawPrice = null,
-  size = null,
-  title = null,
-  image = null,
-  error = null,
-  availablePrices = [],
-}) {
-  return {
-    success,
-    price,
-    rawPrice,
-    size,
-    title,
-    image,
+  // 🔔 Load notifications count from backend
+  useEffect(() => {
+    if (!token) return;
+
+    const fetchNotificationCount = async () => {
+      try {
+        const res = await fetch(
+          `${API_BASE}/api/notifications`,
+          {
+            headers: {
+              Authorization: `Bearer ${token}`,
+            },
+          }
+        );
+        if (!res.ok) return;
+        const data = await res.json();
+        setNotificationCount(Array.isArray(data) ? data.length : 0);
+      } catch (err) {
+        console.error("Error fetching notifications:", err);
+      }
+    };
+
+    fetchNotificationCount();
+  }, [token]);
+
+  // Real-time alerts via socket.io
+  useEffect(() => {
+    const socket = io(API_BASE);
+
+    // Request Notification permission when the component mounts
+    if ("Notification" in window) {
+      Notification.requestPermission().then((perm) => {
+        if (perm === "granted") {
+          console.log("✅ Notification permission granted.");
+        } else {
+          console.log("❌ Notification permission denied or dismissed.");
+        }
+      });
+    }
+
+    socket.on("alertTriggered", (data) => {
+      // 1. Show Sonner toast
+      toast(`🚨 ${data.productName} hit $${data.triggeredPrice}`);
+
+      // 2. Show native browser notification IF permission is granted
+      if (Notification.permission === "granted") {
+        new Notification("PricePulse Alert!", {
+          body: `${data.productName} is now $${data.triggeredPrice}!`,
+          icon: "/favicon.ico",
+        });
+      }
+
+      // 3. 🔴 Bump notification counter for badge
+      setNotificationCount((prev) => prev + 1);
+    });
+
+    return () => {
+      socket.disconnect();
+    };
+  }, []);
+
+  // (You technically don't need this second Notification.useEffect anymore,
+  // but I'm leaving it since it was already in your file and doesn't hurt.)
+  useEffect(() => {
+    if ("Notification" in window) {
+      Notification.requestPermission().then((perm) => {
+        console.log("Notification permission:", perm);
+      });
+    }
+  }, []);
+
+  const {
+    data: products = [],
+    isLoading,
     error,
-    availablePrices,
-  };
-}
+  } = useQuery<Product[], Error>({
+    queryKey: ["products", userId],
+    queryFn: async () => {
+      const res = await fetch(
+        `${API_BASE}/api/products`,
+        {
+          headers: {
+            Authorization: `Bearer ${token}`,
+          },
+        }
+      );
+      if (res.status === 404) return [];
+      if (!res.ok) throw new Error("Failed to fetch products");
+      return res.json();
+    },
+    enabled: !!userId && !!token,
+    refetchInterval: 10000,
+  });
 
-/**
- * MAIN GOAT SCRAPER
- */
-async function scrapeGoat({ url, size, retries = 3 }) {
-  let attempt = 0;
-  size = normalizeSize(size);
+  const removeProduct = async () => {
+    const name = prompt("Enter the product name to remove:");
+    if (!name || !userId) return;
 
-  while (attempt < retries) {
-    attempt++;
-    console.log(
-      `📥 [GOAT] Attempt ${attempt}/${retries} — URL: ${url} | Size: ${size}`
+    const matching = products.filter((p) => p.productName === name);
+    if (matching.length === 0) {
+      alert("No product found with that name.");
+      return;
+    }
+
+    const productToDelete = matching[matching.length - 1];
+    const res = await fetch(
+      `${API_BASE}/api/products/${productToDelete._id}`,
+      {
+        method: "DELETE",
+        headers: {
+          Authorization: `Bearer ${token}`,
+        },
+      }
     );
 
-    let browser = null;
-    try {
-      browser = await puppeteer.launch({
-        headless: "new",
-        args: [
-          "--no-sandbox",
-          "--disable-setuid-sandbox",
-          "--disable-dev-shm-usage",
-          "--disable-gpu",
-          "--disable-web-security",
-          "--disable-features=IsolateOrigins,site-per-process",
-          "--window-size=1920,1080",
-        ],
-      });
-
-      const page = await browser.newPage();
-      await page.setUserAgent(new UserAgent().toString());
-      await page.setExtraHTTPHeaders({ "Accept-Language": "en-US,en;q=0.9" });
-
-      // GOAT sometimes redirects; enable failure handling
-      await page.setDefaultNavigationTimeout(90000);
-
-      console.log("▶️ Navigating to page...");
-      await page.goto(url, { waitUntil: "domcontentloaded" });
-
-      // Additional wait to let dynamic GOAT UI load
-      await delay(4000);
-
-      // Primary selector
-      try {
-        console.log(`⏳ Waiting for main container: ${goatSelectors.buyBarContainer}`);
-        await page.waitForSelector(goatSelectors.buyBarContainer, {
-          timeout: 45000,
-        });
-      } catch (err) {
-        console.warn("⚠️ GOAT UI did not load the buy bar. Retrying...");
-        throw new Error("GOAT buy bar not found");
-      }
-
-      // Extract all available size/price pairs
-      const availablePricesRaw = await page.evaluate(() => {
-        const nodes = document.querySelectorAll('[data-qa^="buy_bar_price_size_"]');
-        return Array.from(nodes).map((el) => {
-          const qa = el.getAttribute("data-qa");
-          const sizeMatch = qa?.match(/size_([\d\.]+)/);
-          return {
-            size: sizeMatch?.[1],
-            rawPrice: el.textContent?.trim() || null,
-          };
-        });
-      });
-
-      console.log("🧪 Available Prices:", availablePricesRaw);
-
-      // Ensure the size exists
-      const target = availablePricesRaw.find((p) => p.size === size);
-      if (!target) {
-        console.log(`❌ Size ${size} not found. Retrying...`);
-
-        if (attempt < retries) {
-          await delay(5000);
-          continue;
-        }
-
-        return buildResult({
-          success: false,
-          error: `Size ${size} not found on GOAT.`,
-          availablePrices: availablePricesRaw,
-        });
-      }
-
-      // Use selectors
-      const priceSelector = goatSelectors.priceForSize(size);
-      const sizeSelector = goatSelectors.sizeForSize(size);
-
-      console.log("⏳ Waiting for price element:", priceSelector);
-      await page.waitForSelector(priceSelector, { visible: true, timeout: 30000 });
-
-      const extracted = await page.evaluate(
-        (priceSel, sizeSel, selectors) => {
-          const priceEl = document.querySelector(priceSel);
-          const sizeEl = document.querySelector(sizeSel);
-          const titleEl = document.querySelector(selectors.title);
-          const imageEl = document.querySelector(selectors.image);
-
-          return {
-            priceText: priceEl?.textContent?.trim() || null,
-            sizeText: sizeEl?.textContent?.trim() || null,
-            title: titleEl?.textContent?.trim() || "No Title Found",
-            image: imageEl?.src || null,
-          };
-        },
-        priceSelector,
-        sizeSelector,
-        goatSelectors
-      );
-
-      const numericPrice = extractNumericPrice(extracted.priceText);
-
-      if (!numericPrice) {
-        console.log(
-          `❌ Could not extract numeric price from "${extracted.priceText}". Retrying...`
-        );
-
-        if (attempt < retries) {
-          await delay(5000);
-          continue;
-        }
-
-        return buildResult({
-          success: false,
-          error: `Failed to extract price for size ${size}.`,
-          availablePrices: availablePricesRaw,
-        });
-      }
-
-      await browser.close();
-
-      console.log("🎉 Successfully scraped price:", numericPrice);
-      return buildResult({
-        success: true,
-        price: numericPrice,
-        rawPrice: extracted.priceText,
-        size: extracted.sizeText,
-        title: extracted.title,
-        image: extracted.image,
-        availablePrices: availablePricesRaw,
-      });
-    } catch (err) {
-      console.error(`🚫 Scrape error attempt ${attempt}:`, err.message);
-
-      if (browser) {
-        try {
-          await browser.close();
-        } catch {}
-      }
-
-      if (attempt < retries) {
-        console.log("🔁 Retrying in 6 seconds...");
-        await delay(6000);
-      } else {
-        return buildResult({
-          success: false,
-          error: `GOAT scraping failed after ${retries} attempts: ${err.message}`,
-        });
-      }
+    if (res.ok) {
+      alert("Product removed successfully.");
+      queryClient.invalidateQueries({ queryKey: ["products", userId] });
+    } else {
+      alert("Failed to remove product.");
     }
-  }
-}
+  };
 
-/**
- * DISPATCHER — supports multiple sites
- */
-async function scrapeProduct({ url, site, size, retries = 3 }) {
-  if (!url) throw new Error("scrapeProduct: 'url' required");
-  if (!site) throw new Error("scrapeProduct: 'site' required");
+  return (
+    <div className="min-h-screen bg-gray-50 dark:bg-gray-900">
+      <Navbar />
+      <Toaster />
+      <main className="max-w-7xl mx-auto px-4 sm:px-6 lg:px-8 py-8 space-y-8">
+        <div className="flex justify-between items-center">
+          <h1 className="text-2xl font-bold text-gray-900 dark:text-white">
+            Dashboard
+          </h1>
 
-  site = site.toLowerCase();
+          <div className="flex items-center gap-3">
+            {/* 🔔 Alerts button */}
+            <button
+              onClick={() => navigate("/alerts")}
+              className="px-3 py-1.5 rounded-md text-sm border border-gray-300 dark:border-gray-700 text-gray-800 dark:text-gray-100 hover:bg-gray-100 dark:hover:bg-gray-800"
+            >
+              Alerts
+            </button>
 
-  switch (site) {
-    case "goat":
-      return scrapeGoat({ url, size, retries });
+            {/* 🔔 Notifications button with badge */}
+            <button
+              onClick={() => navigate("/notifications")}
+              className="relative inline-flex items-center justify-center w-9 h-9 rounded-full border border-gray-300 dark:border-gray-700 hover:bg-gray-100 dark:hover:bg-gray-800"
+            >
+              <span role="img" aria-label="bell">
+                🔔
+              </span>
 
-    default:
-      return buildResult({
-        success: false,
-        error: `Unsupported site: ${site}`,
-      });
-  }
-}
+              {/* Badge only shows if count > 0 */}
+              {notificationCount > 0 && (
+                <span className="absolute -top-1 -right-1 flex h-5 min-w-[1.25rem] items-center justify-center rounded-full bg-red-500 text-[0.7rem] font-semibold text-white px-1">
+                  {notificationCount}
+                </span>
+              )}
+            </button>
 
-module.exports = { scrapeProduct };
+            <AddProductForm />
+
+            <button
+              onClick={removeProduct}
+              className="px-3 py-1.5 rounded-md text-sm bg-red-600 text-white hover:bg-red-700"
+            >
+              Remove Product
+            </button>
+          </div>
+        </div>
+
+        {isLoading ? (
+          <p className="text-gray-600 dark:text-gray-300">Loading...</p>
+        ) : error ? (
+          <p className="text-red-500">Failed to load products</p>
+        ) : products.length === 0 ? (
+          <div className="text-center py-12 text-gray-500 dark:text-gray-400">
+            <p className="text-lg mb-4">
+              You're not tracking any products yet.
+            </p>
+            <AddProductForm />
+          </div>
+        ) : (
+          <>
+            <DashboardSummary products={products} />
+
+            <div className="mt-6">
+              <Tabs defaultValue="all" className="w-full">
+                <TabsList className="mb-4">
+                  <TabsTrigger value="all">All Products</TabsTrigger>
+                  <TabsTrigger value="priceDrops">Price Drops</TabsTrigger>
+                  <TabsTrigger value="priceIncreases">
+                    Price Increases
+                  </TabsTrigger>
+                  <TabsTrigger value="alerts">Alerts</TabsTrigger>
+                </TabsList>
+
+                <TabsContent value="all">
+                  <ProductsTable
+                    products={products}
+                    onSelectProduct={setSelectedProduct}
+                  />
+                </TabsContent>
+                <TabsContent value="priceDrops">
+                  <p className="text-center p-4 text-gray-500 dark:text-gray-400">
+                    Filter showing only products with price drops
+                  </p>
+                </TabsContent>
+                <TabsContent value="priceIncreases">
+                  <p className="text-center p-4 text-gray-500 dark:text-gray-400">
+                    Filter showing only products with price increases
+                  </p>
+                </TabsContent>
+                <TabsContent value="alerts">
+                  <p className="text-center p-4 text-gray-500 dark:text-gray-400">
+                    Filter showing only products with active alerts
+                  </p>
+                </TabsContent>
+              </Tabs>
+            </div>
+
+            <div className="mt-10 space-y-4">
+              <div className="flex gap-3 justify-center">
+                {["24h", "7d", "30d"].map((tf) => (
+                  <button
+                    key={tf}
+                    onClick={() => setTimeframe(tf as any)}
+                    className={`px-3 py-1 text-sm rounded ${
+                      timeframe === tf
+                        ? "bg-indigo-600 text-white"
+                        : "bg-gray-200 dark:bg-gray-700"
+                    }`}
+                  >
+                    {tf === "24h"
+                      ? "24 Hours"
+                      : tf === "7d"
+                      ? "7 Days"
+                      : "30 Days"}
+                  </button>
+                ))}
+              </div>
+
+              {selectedProduct ? (
+                timeframe === "24h" ? (
+                  <Chart24Hour
+                    productName={selectedProduct.productName}
+                    history={selectedProduct.history}
+                  />
+                ) : timeframe === "7d" ? (
+                  <Chart7Day
+                    productName={selectedProduct.productName}
+                    history={selectedProduct.history}
+                  />
+                ) : (
+                  <Chart30Day
+                    productName={selectedProduct.productName}
+                    history={selectedProduct.history}
+                  />
+                )
+              ) : (
+                <p className="text-center mt-8 text-gray-500 dark:text-gray-400">
+                  Click the graph icon to see a price chart for that product.
+                </p>
+              )}
+            </div>
+          </>
+        )}
+      </main>
+    </div>
+  );
+};
+
+export default Dashboard;

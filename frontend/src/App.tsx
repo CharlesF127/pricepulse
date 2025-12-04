@@ -1,9 +1,9 @@
 import { BrowserRouter, Routes, Route } from "react-router-dom";
 
-import Landing from "./pages/Landing";      // ⬅️ new landing page
+import Landing from "./pages/Landing";
 import Login from "./pages/Login";
 import Register from "./pages/Register";
-import Index from "./pages/Dashboard";
+import Dashboard from "./pages/Dashboard";
 import Alerts from "./pages/Alerts";
 import Notifications from "./pages/Notifications";
 import Settings from "./pages/Settings";
@@ -20,7 +20,7 @@ const App = () => {
         <Route path="/register" element={<Register />} />
 
         {/* Main app */}
-        <Route path="/dashboard" element={<Index />} />
+        <Route path="/dashboard" element={<Dashboard />} />
         <Route path="/alerts" element={<Alerts />} />
         <Route path="/notifications" element={<Notifications />} />
         <Route path="/settings" element={<Settings />} />
