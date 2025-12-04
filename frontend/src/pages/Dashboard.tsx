@@ -68,7 +68,7 @@ const Dashboard = () => {
 
   // Real-time alerts via socket.io
   useEffect(() => {
-    const socket = io("`${API_BASE}");
+    const socket = io(API_BASE);
 
     // Request Notification permission when the component mounts
     if ("Notification" in window) {

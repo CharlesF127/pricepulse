@@ -14,6 +14,7 @@ import {
 } from '@/components/ui/dialog';
 import { toast } from '@/components/ui/sonner';
 import { useMutation, useQueryClient } from '@tanstack/react-query';
+import { API_BASE } from '@/config';
 
 const AddProductForm = () => {
   const [isOpen, setIsOpen] = useState(false);
@@ -30,7 +31,7 @@ const AddProductForm = () => {
     mutationFn: async () => {
       const numericSize = Number(size);
 
-      const response = await fetch("`${API_BASE}/api/products", {
+      const response = await fetch(`${API_BASE}/api/products`, {
         method: "POST",
         headers: {
           "Content-Type": "application/json",

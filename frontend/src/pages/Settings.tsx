@@ -1,8 +1,8 @@
 import React, { useEffect, useState } from "react";
 import { useNavigate } from "react-router-dom";
 import { useQuery, useMutation, useQueryClient } from "@tanstack/react-query";
+import { API_BASE } from "@/config";
 
-const API_BASE = "`${API_BASE}";
 
 type SettingsResponse = {
   email: string;

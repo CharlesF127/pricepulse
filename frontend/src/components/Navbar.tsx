@@ -2,19 +2,18 @@
 import React from "react";
 import { Link, useLocation, useNavigate } from "react-router-dom";
 import { useQuery } from "@tanstack/react-query";
+import { API_BASE } from "../config";
 
 const Navbar: React.FC = () => {
   const location = useLocation();
   const navigate = useNavigate();
   const token = localStorage.getItem("token");
 
-  const {
-    data: notifications = [],
-  } = useQuery({
+  const { data: notifications = [] } = useQuery({
     queryKey: ["notifications"],
     queryFn: async () => {
       if (!token) return [];
-      const res = await fetch("`${API_BASE}/api/notifications", {
+      const res = await fetch(`${API_BASE}/api/notifications`, {
         headers: {
           Authorization: `Bearer ${token}`,
         },
