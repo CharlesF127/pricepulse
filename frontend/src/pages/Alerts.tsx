@@ -46,7 +46,7 @@ const AlertsPage: React.FC = () => {
   } = useQuery<Product[]>({
     queryKey: ["products", userId],
     queryFn: async () => {
-      const res = await fetch(`${API_BASE}/api/products?userId=${userId}`, {
+      const res = await fetch(`${API_BASE}/api/products`, {
         headers: {
           Authorization: `Bearer ${token}`,
         },
