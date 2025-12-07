@@ -41,7 +41,18 @@ router.post("/", authMiddleware, async (req, res) => {
   }
 
   try {
-    // 🔥 IMPORTANT: use the new dispatcher signature
+    // 🔒 LIMIT: max 5 products per user
+    const currentCount = await Product.countDocuments({ userId });
+
+    if (currentCount >= 5) {
+      return res.status(403).json({
+        msg: "You can only track up to 5 products at a time.",
+        limit: 5,
+        currentCount,
+      });
+    }
+
+    // 🔥 Use the puppeteer dispatcher
     const result = await scrapeProduct({ url, site, size });
 
     if (!result.success || result.price === undefined || result.price === null) {
