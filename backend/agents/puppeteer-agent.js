@@ -13,9 +13,18 @@ puppeteer.use(StealthPlugin());
 
 /**
  * ✅ REQUIRED FOR RENDER
- * Chrome must be installed manually & path injected via env var
+ * Chrome must be installed manually & path injected / hardcoded for production.
  */
-const EXECUTABLE_PATH = process.env.PUPPETEER_EXECUTABLE_PATH;
+const isRender =
+  process.env.RENDER === "true" || !!process.env.RENDER_INTERNAL_ENVIRONMENT;
+
+// Path from your Render build logs:
+// /opt/render/.cache/puppeteer/chrome/linux-136.0.7103.94/chrome-linux64/chrome
+const EXECUTABLE_PATH =
+  process.env.PUPPETEER_EXECUTABLE_PATH ||
+  (isRender
+    ? "/opt/render/.cache/puppeteer/chrome/linux-136.0.7103.94/chrome-linux64/chrome"
+    : undefined);
 
 console.log("🚀 Puppeteer using executable:", EXECUTABLE_PATH);
 
@@ -77,7 +86,7 @@ async function scrapeGoat({ url, size, retries = 3 }) {
 
         /**
          * ✅ FIX FOR RENDER
-         * Puppeteer must use the installed Chrome from env variable
+         * Puppeteer must use the installed Chrome in production
          */
         executablePath: EXECUTABLE_PATH,
 
@@ -104,7 +113,9 @@ async function scrapeGoat({ url, size, retries = 3 }) {
       await delay(4000);
 
       try {
-        console.log(`⏳ Waiting for main container: ${goatSelectors.buyBarContainer}`);
+        console.log(
+          `⏳ Waiting for main container: ${goatSelectors.buyBarContainer}`
+        );
         await page.waitForSelector(goatSelectors.buyBarContainer, {
           timeout: 45000,
         });
@@ -113,7 +124,9 @@ async function scrapeGoat({ url, size, retries = 3 }) {
       }
 
       const availablePricesRaw = await page.evaluate(() => {
-        const nodes = document.querySelectorAll('[data-qa^="buy_bar_price_size_"]');
+        const nodes = document.querySelectorAll(
+          '[data-qa^="buy_bar_price_size_"]'
+        );
         return Array.from(nodes).map((el) => {
           const qa = el.getAttribute("data-qa");
           const sizeMatch = qa?.match(/size_([\d\.]+)/);
@@ -142,7 +155,10 @@ async function scrapeGoat({ url, size, retries = 3 }) {
       const priceSelector = goatSelectors.priceForSize(size);
       const sizeSelector = goatSelectors.sizeForSize(size);
 
-      await page.waitForSelector(priceSelector, { visible: true, timeout: 30000 });
+      await page.waitForSelector(priceSelector, {
+        visible: true,
+        timeout: 30000,
+      });
 
       const extracted = await page.evaluate(
         (priceSel, sizeSel, selectors) => {
@@ -193,7 +209,9 @@ async function scrapeGoat({ url, size, retries = 3 }) {
       console.error(`🚫 Scrape error attempt ${attempt}:`, err.message);
 
       if (browser) {
-        try { await browser.close(); } catch {}
+        try {
+          await browser.close();
+        } catch {}
       }
 
       if (attempt < retries) {
