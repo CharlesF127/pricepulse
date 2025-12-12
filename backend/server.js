@@ -18,12 +18,13 @@ const { scrapeProduct } = require("./agents/puppeteer-agent");
 const app = express();
 const server = http.createServer(app);
 
-// 👇 Centralized allowed frontend origin
-const CLIENT_ORIGIN = process.env.CLIENT_ORIGIN || "http://localhost:8080";
+// 👇 Centralized allowed frontend origins (support multiple)
+const rawOrigins = process.env.CLIENT_ORIGIN || "http://localhost:8080";
+const ALLOWED_ORIGINS = rawOrigins.split(",").map((o) => o.trim());
 
 const io = new Server(server, {
   cors: {
-    origin: CLIENT_ORIGIN,
+    origin: ALLOWED_ORIGINS,
     methods: ["GET", "POST"],
   },
 });
@@ -31,11 +32,20 @@ const io = new Server(server, {
 // Middleware
 app.use(
   cors({
-    origin: CLIENT_ORIGIN,
+    origin: (origin, callback) => {
+      // allow non-browser tools (no Origin) and allowed origins
+      if (!origin || ALLOWED_ORIGINS.includes(origin)) {
+        callback(null, true);
+      } else {
+        callback(new Error("Not allowed by CORS"));
+      }
+    },
     credentials: true,
   })
 );
+
 app.use(express.json());
+
 
 // ✅ MongoDB connection
 const mongoUri = process.env.MONGO_URI;
