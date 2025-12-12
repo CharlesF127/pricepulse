@@ -16,7 +16,9 @@ type Alert = {
   triggered: boolean;
 };
 
-const API_BASE = "`${API_BASE}";
+// ✅ Use the real API base from env (same as login page)
+const API_BASE =
+  import.meta.env.VITE_API_BASE_URL || "http://localhost:5000";
 
 const AlertsPage: React.FC = () => {
   const navigate = useNavigate();
@@ -313,9 +315,7 @@ const AlertsPage: React.FC = () => {
               Loading alerts...
             </p>
           ) : alertsError ? (
-            <p className="text-sm text-red-500">
-              Failed to load alerts.
-            </p>
+            <p className="text-sm text-red-500">Failed to load alerts.</p>
           ) : alerts.length === 0 ? (
             <p className="text-sm text-gray-500 dark:text-gray-400">
               You don't have any alerts yet.
